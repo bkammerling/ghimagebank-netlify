@@ -3,5 +3,9 @@
     "version": "1.0.0",
     "description": "A site to show a hello world example of using Netlify Functions",
     "author": "Netlify",
-    "license": "ISC"
+    "license": "ISC",
+    "dependencies": {
+        "flickr-sdk": "^5.0.0",
+        "mongodb": "^4.4.0"
+    }
 }
