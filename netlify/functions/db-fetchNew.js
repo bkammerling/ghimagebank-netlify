@@ -48,6 +48,7 @@ async function addFlickrPhotosToMongoDB(client, page) {
   const imagesReturned = flickrResponse.body.photoset.photo;
   const imagesToInsert = imagesReturned.map(doc => {
     doc._id = doc.id;
+    doc.dateupload = parseInt(doc.dateupload);
     doc.lastModified = new Date();
     doc.dateInserted = new Date();
     delete doc.isfriend;
