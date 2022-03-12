@@ -5,10 +5,9 @@ const DB_USER = process.env.DB_USER,
 const uri = `mongodb+srv://${DB_USER}:${DB_PASS}@gh-imagebank.axxa1.mongodb.net/image_bank?retryWrites=true&w=majority`;
 let output;
 
-exports.handler = async event => {
-  const query = event.queryStringParameters;
+exports.handler = async (event, context) => {
   const client = new MongoClient(uri);
-  let image = JSON.parse(event.body);
+  var image = JSON.parse(event.body);
   if(typeof image._id === "undefined") image._id = image.id;
   try {
     await client.connect();
@@ -17,6 +16,8 @@ exports.handler = async event => {
   } catch(e) {
     console.log(e);
     status = 404;
+  } finally {
+    await client.close();
   }
   return {
     headers: {

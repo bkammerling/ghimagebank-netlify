@@ -16,6 +16,8 @@ exports.handler = async event => {
   } catch(e) {
     console.log(e);
     status = 404;
+  } finally {
+    await client.close();
   }
   return {
     headers: {
