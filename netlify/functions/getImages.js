@@ -33,6 +33,7 @@ exports.handler = async event => {
 async function findImages(client, query = {} ) {
   // Set up filter from query object
   const page = query.p,
+        parent = query.parent,
         search = query.search,
         country = query.country,
         brand = query.brand,
@@ -40,6 +41,8 @@ async function findImages(client, query = {} ) {
         los = query.los,
         ren = query.ren;
   let filter = { $and: []};
+
+  filter.$and.push({ brand: parent });
 
   if(search) {
     const searchRegExp = new RegExp(`(?=.*${search.split(' ').join(')(?=.*')}).*`, 'i');

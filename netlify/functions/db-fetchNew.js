@@ -1,4 +1,15 @@
 const {MongoClient} = require('mongodb');
+const { initializeApp } = require('firebase-admin/app');
+const admin = require("firebase-admin");
+const serviceAccount = require("./../../good-humans-timesheet-firebase-adminsdk-65n49-77381f37a7.json");
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://good-humans-timesheet.firebaseio.com"
+  });  
+}
+
 const Flickr = require('flickr-sdk');
 
 const DB_USER = process.env.DB_USER,
@@ -21,10 +32,11 @@ exports.handler = async event => {
   const query = event.queryStringParameters;
   const client = new MongoClient(uri);
   let page = 1;
+  const brandObj = await fetchBrands();
   const maxImages = await getImageCount();
   const maxPages = Math.ceil(maxImages / flickrPerPage);
-  const response = await addFlickrPhotosToMongoDB(client, maxPages);
-  console.log(response);
+  const response = await addFlickrPhotosToMongoDB(client, maxPages, brandObj);
+  console.log('response', response);
   const imagesInserted = ((maxPages - response.page) * flickrPerPage) + response.lastPageInsertedCount;
   return {
     headers: {
@@ -35,7 +47,7 @@ exports.handler = async event => {
   }
 };
 
-async function addFlickrPhotosToMongoDB(client, page) {
+async function addFlickrPhotosToMongoDB(client, page, brandObj) {
   console.log(`Starting API call to Flickr page ${page}`);
   const flickrResponse = await flickr.photosets.getPhotos({
     photoset_id: '72157685205779916',
@@ -46,11 +58,16 @@ async function addFlickrPhotosToMongoDB(client, page) {
   });
   if (flickrResponse.errors !== undefined && flickrResponse.errors.length) throw new Error(response.errors);
   const imagesReturned = flickrResponse.body.photoset.photo;
+  console.log('flickr length: ', imagesReturned.length)
   const imagesToInsert = imagesReturned.map(doc => {
     doc._id = doc.id;
     doc.dateupload = parseInt(doc.dateupload);
     doc.lastModified = new Date();
     doc.dateInserted = new Date();
+    for (const [key, value] of Object.entries(brandObj)) {
+      const regex = new RegExp(`^(${value.join("|")})`)
+      if(regex.test(doc.title)) doc.brand = key
+    }  
     delete doc.isfriend;
     delete doc.isprimary;
     delete doc.ispublic;
@@ -59,13 +76,16 @@ async function addFlickrPhotosToMongoDB(client, page) {
   })
   const dbResponse = await insertManyImages(client, imagesToInsert);
   console.log(`Done page ${page}`);
+  console.log('dbResponse: ', dbResponse);
   // check to see if we need to fetch more images
   // we won't go under page 580 as that suggests an error (total 589 pages at time of coding)
   if(dbResponse.inserted === imagesReturned.length && page-1 > 580) {
-    addFlickrPhotosToMongoDB(page-1);
+    console.log('running again');
+    await addFlickrPhotosToMongoDB(client, page-1, brandObj);
   } else if(dbResponse.inserted < imagesReturned.length) {
-    return { lastPageInsertedCount: dbResponse.inserted, page, status: dbResponse.status }
-  }
+    console.log(`inserted less than returned at page ${page}`)
+    return { lastPageInsertedCount: dbResponse.inserted, page: page, status: dbResponse.status }
+  } 
 }
 
 const getImageCount = async () => {
@@ -86,7 +106,7 @@ const insertManyImages = async (client, newImages) => {
   try {
     await client.connect();
     const result = await client.db("image_bank").collection("images").insertMany(newImages, { ordered: false });
-    console.log(result);
+    console.log('mongo result insertedCount: ', result.insertedCount);
     //if no error, all images were inserted successfully
     returnObject.inserted = result.insertedCount;
     returnObject.status = "success";
@@ -95,11 +115,33 @@ const insertManyImages = async (client, newImages) => {
     if(e.code === 11000) console.log('Expected duplicate ID error');
     if(e.result?.nInserted < newImages.length) {
       //some images weren't inserted - likely duplicates, stop fetching images
+      console.log(e.result)
       returnObject.inserted = e.result.nInserted;
       returnObject.status = `success: ${e.code}`
     } else {
+      console.log(e.result)
       returnObject.status = `error: ${e.code}`;
     }
+  } finally {
+    return returnObject;
   }
-  return returnObject;
+}
+
+const fetchBrands = async () => {
+  const db = admin.database();
+  const ref = db.ref("/imagebank/brands_2022");
+  const snapshot = await ref.once("value");
+  const brandsObj = snapshot.val(); 
+  // Convert into object we can use to check images against { parentBrand: [ label1, label2], ... }
+  let parentObj = {};
+  Object.values(brandsObj).map(e => {
+    if(e.parent === "") return;
+    if(!parentObj[e.parent]) { 
+      parentObj[e.parent] = [e.label];
+    } else {
+      parentObj[e.parent].push(e.label);
+    }
+    return false;
+  })
+  return parentObj;
 }

@@ -66,6 +66,10 @@ netlify dev
   var docArray = db.images.find({ 'lastModified': { $exists: false} });
   db.images.deleteMany(docArray);
 
+  # with date in query
+  var docArray = db.images.find({ 'dateInserted': { $gte: new ISODate("2022-03-14T21:45:31Z") } });
+  var docArray = db.images.find({ 'dateupload': { $gte: 1647292177 } });
+
   # Find and loop with $exists example - VERY SLOW WAY
   db.images.find({ 'lastModified': { $exists: false} }).forEach(doc => {
     const newDoc = { ...doc, _id: doc.id, lastModified: new Date(), dateInserted: new Date() }
@@ -77,12 +81,15 @@ netlify dev
     db.images.deleteOne({ "_id": doc._id })
   });
 
+  # Update all documents with a new property
+  db.images.updateMany({}, { $set: { "newProperty" : "aValue" } });
+
 ```
 
 ## MongoDB Backup with mongodump
 
 ```shell
 
- mongodump --uri=mongodb+srv://URI -u="USER" -p="PASSWORD" --authenticationDatabase="admin" --out="dump-$(date +%d)"
+ mongodump --uri=mongodb+srv://URI -u="USER" --authenticationDatabase="admin" --out="dump-$(date +%F)"
 
  ```
