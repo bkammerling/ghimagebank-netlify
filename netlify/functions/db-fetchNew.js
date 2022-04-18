@@ -1,5 +1,4 @@
 const {MongoClient} = require('mongodb');
-const { initializeApp } = require('firebase-admin/app');
 const admin = require("firebase-admin");
 
 if (!admin.apps.length) {
@@ -84,9 +83,11 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj) {
   // check to see if we need to fetch more images
   // we won't go under page 580 as that suggests an error (total 589 pages at time of coding)
   if(dbResponse.inserted === imagesReturned.length && page-1 > 580) {
+    // all images were inserted - so let's keep fetching more images from Flickr
     console.log('running again');
     await addFlickrPhotosToMongoDB(client, page-1, brandObj);
   } else if(dbResponse.inserted < imagesReturned.length) {
+    // suggests that we've reached images that are already in the DB
     console.log(`inserted less than returned at page ${page}`)
     return { lastPageInsertedCount: dbResponse.inserted, page: page, status: dbResponse.status }
   } 
@@ -123,6 +124,8 @@ const insertManyImages = async (client, newImages) => {
       returnObject.inserted = e.result.nInserted;
       returnObject.status = `success: ${e.code}`
     } else {
+      delete e.result.writeErrors;
+      delete e.result.insertedIds;
       console.log(e.result)
       returnObject.status = `error: ${e.code}`;
     }
