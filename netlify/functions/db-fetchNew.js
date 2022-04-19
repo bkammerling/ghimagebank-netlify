@@ -120,12 +120,11 @@ const insertManyImages = async (client, newImages) => {
     if(e.code === 11000) console.log('Expected duplicate ID error');
     if(e.result?.nInserted < newImages.length) {
       //some images weren't inserted - likely duplicates, stop fetching images
-      console.log(e.result)
+      const {writeErrors, insertedIds, ...logObj} = e.result.result;
+      console.log(logObj)
       returnObject.inserted = e.result.nInserted;
       returnObject.status = `success: ${e.code}`
     } else {
-      delete e.result.writeErrors;
-      delete e.result.insertedIds;
       console.log(e.result)
       returnObject.status = `error: ${e.code}`;
     }
