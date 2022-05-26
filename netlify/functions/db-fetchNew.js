@@ -99,7 +99,7 @@ const getImageCount = async () => {
     user_id: '25964651@N03',
   });
   if (response.errors !== undefined && response.errors.length) throw new Error(response.errors);
-  return response.body.photoset.count_photos;
+  return response.body.photoset.count_photos + response.body.photoset.count_videos;
 }
 
 
