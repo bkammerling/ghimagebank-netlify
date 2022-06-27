@@ -68,7 +68,8 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj) {
     doc.lastModified = new Date();
     doc.dateInserted = new Date();
     for (const [key, value] of Object.entries(brandObj)) {
-      const regex = new RegExp(`^(${value.join("|")})`)
+      // brand code must match, followed by 2 numbers (so BURN-B doesn't catch Babyjogger-BJ) 
+      const regex = new RegExp(`^(${value.join("|")})\\d\\d`)
       if(regex.test(doc.title)) doc.brand = key
     }  
     delete doc.isfriend;
