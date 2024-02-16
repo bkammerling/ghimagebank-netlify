@@ -73,6 +73,8 @@ async function findImages(client, query = {} ) {
     });
   }
 
+  console.log(filter);
+
   const cursor = client.db("image_bank").collection("images").find(filter)
     .sort({ dateupload: -1 })
     .skip( page > 0 ? ( ( page - 1 ) * maximumNumberOfResults ) : 0 )
