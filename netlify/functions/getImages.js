@@ -73,6 +73,7 @@ async function findImages(client, query = {} ) {
     });
   }
 
+  // logging filter for debugging an issue
   console.log(filter);
 
   const cursor = client.db("image_bank").collection("images").find(filter)
