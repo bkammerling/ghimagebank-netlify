@@ -41,25 +41,15 @@ async function findImages(client, query = {} ) {
         los = query.los,
         ren = query.ren;
   let filter = { $and: []};
-
-  filter.$and.push({ brand: parent });
-
+  
   if(search) {
     const searchRegExp = new RegExp(`(?=.*${search.split(' ').join(')(?=.*')}).*`, 'i');
     filter.$and.push({ title: searchRegExp });
+    // We could replace the above with a mongo $search to speed it up
+    //filter.$and.push({ $text: { $search: search }});
   }
 
-  const countryRegExp = new RegExp(country);
-  filter.$and.push({ title: countryRegExp });
-
-  const brandRegExp = new RegExp('^'+brand+'(Ren)?\\d\\d');
-  if(typeof brand !== 'undefined' && brand.length >= 1) filter.$and.push({ title: brandRegExp});
-
-  const losRegExp = new RegExp('LOS');
-  if(los === "true") filter.$and.push({ title: losRegExp});
-
-  const renRegExp = new RegExp(/^\w{1,3}Ren./);
-  if(ren === "true") filter.$and.push({ title: renRegExp});
+  filter.$and.push({ brand: parent });
 
   if(typeof dates !== 'undefined' && dates.length > 20) {
     //make sure dates is defined and isn't NaN (20 ensures we have actual data)
@@ -72,6 +62,19 @@ async function findImages(client, query = {} ) {
       }
     });
   }
+
+  if(country) {
+    filter.$and.push({ $text: { $search: country }});
+  }
+
+  const brandRegExp = new RegExp('^'+brand+'(Ren)?\\d\\d');
+  if(typeof brand !== 'undefined' && brand.length >= 1) filter.$and.push({ title: brandRegExp});
+
+  const losRegExp = new RegExp('LOS');
+  if(los === "true") filter.$and.push({ title: losRegExp});
+
+  const renRegExp = new RegExp(/^\w{1,3}Ren./);
+  if(ren === "true") filter.$and.push({ title: renRegExp});
 
   // logging filter for debugging an issue
   console.log(filter);
