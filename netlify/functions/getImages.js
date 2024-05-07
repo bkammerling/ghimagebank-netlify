@@ -43,10 +43,10 @@ async function findImages(client, query = {} ) {
   let filter = { $and: []};
   
   if(search) {
-    const searchRegExp = new RegExp(`(?=.*${search.split(' ').join(')(?=.*')}).*`, 'i');
-    filter.$and.push({ title: searchRegExp });
-    // We could replace the above with a mongo $search to speed it up
-    //filter.$and.push({ $text: { $search: search }});
+    //const searchRegExp = new RegExp(`(?=.*${search.split(' ').join(')(?=.*')}).*`, 'i');
+    //filter.$and.push({ title: searchRegExp });
+    // Mongo $search is much fasster
+    filter.$and.push({ $text: { $search: search }});
   }
 
   filter.$and.push({ brand: parent });
