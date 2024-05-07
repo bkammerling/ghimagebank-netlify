@@ -64,7 +64,8 @@ async function findImages(client, query = {} ) {
   }
 
   if(country) {
-    filter.$and.push({ $text: { $search: country }});
+    const countryRegExp = new RegExp(country);
+    filter.$and.push({ title: countryRegExp });
   }
 
   const brandRegExp = new RegExp('^'+brand+'(Ren)?\\d\\d');
