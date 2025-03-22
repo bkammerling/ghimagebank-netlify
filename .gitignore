@@ -5,3 +5,4 @@ node_modules
 .netlify
 
 db_backups
+.env
