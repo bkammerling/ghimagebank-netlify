@@ -1,5 +1,18 @@
 const {MongoClient} = require('mongodb');
 const Flickr = require('flickr-sdk');
+const admin = require("firebase-admin");
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      "projectId": process.env.FIREBASE_PROJECT_ID,
+      "private_key": process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      "client_email": process.env.FIREBASE_CLIENT_EMAIL,
+    }),
+    databaseURL: "https://good-humans-timesheet.firebaseio.com"
+  });  
+}
+
 
 const DB_USER = process.env.DB_USER,
       DB_PASS = process.env.DB_PASS;
@@ -14,24 +27,18 @@ const flickr = new Flickr(Flickr.OAuth.createPlugin(
 const flickrPerPage = 100;
 // Total images found in flickr
 let totalImages = 0;
-// Total images fully matching search and regex
-let totalMatched = 0;
 // New images actually inserted into the database
 let imagesInserted = 0;
-// Search query for flickr - careful this doesn't bring up other brands' images
-const search = 'JE';
-const brand = 'jewson';
 const uri = `mongodb+srv://${DB_USER}:${DB_PASS}@gh-imagebank.axxa1.mongodb.net/image_bank?retryWrites=true&w=majority`;
 
 exports.handler = async event => {
   const query = event.queryStringParameters;
   const client = new MongoClient(uri);
-  let page = 1;
-  // const maxImages = await getImageCount();
-  // const maxPages = Math.ceil(maxImages / flickrPerPage);
+  const brandObj = await fetchBrands();
 
-  // We are only fetching images for JE brand!
-  const response = await addFlickrPhotosToMongoDB(client, page);
+  let page = 1;
+  // We are only fetching images for one brand at a time!
+  const response = await addFlickrPhotosToMongoDB(client, page, brandObj);
   console.log('My response: ', response);
 
   return {
@@ -39,16 +46,18 @@ exports.handler = async event => {
       "Access-Control-Allow-Origin": "*"
     },
     statusCode: 200,
-    body: JSON.stringify({ totalImages, imagesMatched, imagesInserted, status: response.status })
+    body: JSON.stringify({ totalImages, imagesInserted, status: response.status })
   }
 };
 
-async function addFlickrPhotosToMongoDB(client, page) {
+async function addFlickrPhotosToMongoDB(client, page, brandObj) {
   console.log(`Starting API call to Flickr page ${page}`);
+  // get unix date for 1 month ago
+  const unixDate = Math.floor(Date.now() / 1000) - (60 * 60 * 24 * 30);
   try {
     const flickrResponse = await flickr.photos.search({
       user_id: '25964651@N03',
-      text: search,
+      min_upload_date: unixDate,
       extras: 'date_upload, o_dims, url_o',
       per_page: flickrPerPage,
       page: page
@@ -61,28 +70,24 @@ async function addFlickrPhotosToMongoDB(client, page) {
     console.log('Total pages: ' + maxPages);
     const imagesReturned = flickrResponse.body.photos.photo;
     
-    // Create regex to test the titles against our search label (e.g. JE00)
-    const regex = new RegExp(`^${search}\\d{2}`); 
-
-    // Filter out images that don't match our search label and clean the data
-    const imagesToInsert = imagesReturned
-      .filter(doc => doc.title && regex.test(doc.title))
-      .map(doc => {
+    const imagesToInsert = imagesReturned.map(doc => {
         doc._id = doc.id;
         doc.dateupload = parseInt(doc.dateupload);
         doc.lastModified = new Date();
         doc.dateInserted = new Date();
-        doc.brand = brand;  
+        for (const [key, value] of Object.entries(brandObj)) {
+          // brand code must match, followed by 2 numbers (so BURN-B doesn't catch Babyjogger-BJ) 
+          const regex = new RegExp(`^(${value.join("|")})\\d\\d`)
+          if(regex.test(doc.title)) doc.brand = key
+        }  
         delete doc.isfriend;
         delete doc.isprimary;
         delete doc.ispublic;
         delete doc.isfamily;
         delete doc.owner;
-        console.log(doc.title);
         return doc;
-      })
-    totalMatched += imagesToInsert.length;
-    // Insert out filtered images into the DB
+    })
+    // Insert our images into the DB
     const dbResponse = await insertManyImages(client, imagesToInsert);
     console.log(`Done page ${page}`);
     console.log('dbResponse: ', dbResponse);
@@ -92,7 +97,7 @@ async function addFlickrPhotosToMongoDB(client, page) {
     if(page < maxPages) {
       // all we still have more pages to check in Flickr
       console.log('running again');
-      return await addFlickrPhotosToMongoDB(client, page+1);
+      return await addFlickrPhotosToMongoDB(client, page+1, brandObj);
     } else {
       // we've done the final page
       console.log(`All pages done, finishing up.`)
@@ -126,7 +131,7 @@ const insertManyImages = async (client, newImages) => {
     if(e.result?.nInserted < newImages.length) {
       //some images weren't inserted - likely duplicates, stop fetching images
       const {writeErrors, insertedIds, ...logObj} = e.result.result;
-      console.log('logObj: ' + logObj)
+      console.log(logObj)
       returnObject.inserted = e.result.nInserted;
       returnObject.status = `success: ${e.code}`
     } else {
@@ -139,11 +144,21 @@ const insertManyImages = async (client, newImages) => {
 }
 
 
-const getImageCount = async () => {
-  const response = await flickr.photosets.getInfo({
-    photoset_id: '72157685205779916',
-    user_id: '25964651@N03',
-  });
-  if (response.errors !== undefined && response.errors.length) throw new Error(response.errors);
-  return response.body.photoset.count_photos + response.body.photoset.count_videos;
+const fetchBrands = async () => {
+  const db = admin.database();
+  const ref = db.ref("/imagebank/brands_2022");
+  const snapshot = await ref.once("value");
+  const brandsObj = snapshot.val(); 
+  // Convert into object we can use to check images against { parentBrand: [ label1, label2], ... }
+  let parentObj = {};
+  Object.values(brandsObj).map(e => {
+    if(e.parent === "") return;
+    if(!parentObj[e.parent]) { 
+      parentObj[e.parent] = [e.label];
+    } else {
+      parentObj[e.parent].push(e.label);
+    }
+    return false;
+  })
+  return parentObj;
 }
