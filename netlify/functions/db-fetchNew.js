@@ -30,17 +30,16 @@ const oauth = new Flickr.OAuth(
 );
 const flickrPerPage = 100;
 const uri = `mongodb+srv://${DB_USER}:${DB_PASS}@gh-imagebank.axxa1.mongodb.net/image_bank?retryWrites=true&w=majority`;
+let imagesInserted = 0;
 
 exports.handler = async event => {
   const query = event.queryStringParameters;
   const client = new MongoClient(uri);
+  // Page 1 as it gets latest uploaded images first
   let page = 1;
   const brandObj = await fetchBrands();
-  const maxImages = await getImageCount();
-  const maxPages = Math.ceil(maxImages / flickrPerPage);
-  const response = await addFlickrPhotosToMongoDB(client, maxPages, brandObj);
-  console.log('response', response);
-  const imagesInserted = ((maxPages - response.page) * flickrPerPage) + response.lastPageInsertedCount;
+  const response = await addFlickrPhotosToMongoDB(client, page, brandObj);
+  console.log('Final response from loop: ', response);
   return {
     headers: {
       "Access-Control-Allow-Origin": "*"
@@ -52,16 +51,18 @@ exports.handler = async event => {
 
 async function addFlickrPhotosToMongoDB(client, page, brandObj) {
   console.log(`Starting API call to Flickr page ${page}`);
-  const flickrResponse = await flickr.photosets.getPhotos({
-    photoset_id: '72157685205779916',
+  const flickrResponse = await flickr.people.getPhotos({
     user_id: '25964651@N03',
     extras: 'date_upload, o_dims, url_o',
     per_page: flickrPerPage,
     page: page
   });
+  // Throw error if there are any in the response
   if (flickrResponse.errors !== undefined && flickrResponse.errors.length) throw new Error(response.errors);
-  const imagesReturned = flickrResponse.body.photoset.photo;
+  // Get photos from flickr response body
+  const imagesReturned = flickrResponse.body.photos.photo;
   console.log('flickr length: ', imagesReturned.length)
+  // Prepare images for insertion into MongoDB
   const imagesToInsert = imagesReturned.map(doc => {
     doc._id = doc.id;
     doc.dateupload = parseInt(doc.dateupload);
@@ -81,28 +82,18 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj) {
   const dbResponse = await insertManyImages(client, imagesToInsert);
   console.log(`Done page ${page}`);
   console.log('dbResponse: ', dbResponse);
-  // check to see if we need to fetch more images
-  // we won't go under page 580 as that suggests an error (total 589 pages at time of coding)
-  if(dbResponse.inserted === imagesReturned.length && page-1 > 580) {
+  imagesInserted += dbResponse.inserted || 0;
+  // Check to see if we need to fetch more images, max pages for this call is 20
+  if(dbResponse.inserted === imagesReturned.length && page+1 <= 20) {
     // all images were inserted - so let's keep fetching more images from Flickr
-    console.log('running again');
-    await addFlickrPhotosToMongoDB(client, page-1, brandObj);
+    console.log('Running again');
+    await addFlickrPhotosToMongoDB(client, page+1, brandObj);
   } else if(dbResponse.inserted < imagesReturned.length) {
     // suggests that we've reached images that are already in the DB
-    console.log(`inserted less than returned at page ${page}`)
+    console.log(`Inserted less than returned at page ${page}`)
     return { lastPageInsertedCount: dbResponse.inserted, page: page, status: dbResponse.status }
   } 
 }
-
-const getImageCount = async () => {
-  const response = await flickr.photosets.getInfo({
-    photoset_id: '72157685205779916',
-    user_id: '25964651@N03',
-  });
-  if (response.errors !== undefined && response.errors.length) throw new Error(response.errors);
-  return response.body.photoset.count_photos + response.body.photoset.count_videos;
-}
-
 
 const insertManyImages = async (client, newImages) => {
   let returnObject = {
@@ -112,22 +103,22 @@ const insertManyImages = async (client, newImages) => {
   try {
     await client.connect();
     const result = await client.db("image_bank").collection("images").insertMany(newImages, { ordered: false });
-    console.log('mongo result insertedCount: ', result.insertedCount);
-    //if no error, all images were inserted successfully
+    console.log('Mongo result insertedCount: ', result.insertedCount);
+    // If no error, all images were inserted successfully
     returnObject.inserted = result.insertedCount;
-    returnObject.status = "success";
+    returnObject.status = "Success";
   } catch(e) {
     console.log('Write Error: ' + e.code);
     if(e.code === 11000) console.log('Expected duplicate ID error');
     if(e.result?.nInserted < newImages.length) {
-      //some images weren't inserted - likely duplicates, stop fetching images
+      // Some images weren't inserted - likely duplicates, stop fetching images
       const {writeErrors, insertedIds, ...logObj} = e.result.result;
       console.log(logObj)
       returnObject.inserted = e.result.nInserted;
-      returnObject.status = `success: ${e.code}`
+      returnObject.status = `Success: ${e.code}`
     } else {
       console.log(e.result)
-      returnObject.status = `error: ${e.code}`;
+      returnObject.status = `Error: ${e.code}`;
     }
   } finally {
     return returnObject;
