@@ -1,6 +1,7 @@
 const {MongoClient} = require('mongodb');
 const Flickr = require('flickr-sdk');
 const admin = require("firebase-admin");
+const { stream } = require("@netlify/functions");
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -12,7 +13,6 @@ if (!admin.apps.length) {
     databaseURL: "https://good-humans-timesheet.firebaseio.com"
   });  
 }
-
 
 const DB_USER = process.env.DB_USER,
       DB_PASS = process.env.DB_PASS;
@@ -26,34 +26,46 @@ const flickr = new Flickr(Flickr.OAuth.createPlugin(
 
 const flickrPerPage = 100;
 // Total images found in flickr
-let totalImages = 0;
+let totalImages;
 // New images actually inserted into the database
 let imagesInserted = 0;
 const uri = `mongodb+srv://${DB_USER}:${DB_PASS}@gh-imagebank.axxa1.mongodb.net/image_bank?retryWrites=true&w=majority`;
 
-exports.handler = async event => {
-  const query = event.queryStringParameters;
+export default handler = async () => {
+  const encoder = new TextEncoder();
   const client = new MongoClient(uri);
   const brandObj = await fetchBrands();
 
   let page = 1;
-  // We are only fetching images for one brand at a time!
-  const response = await addFlickrPhotosToMongoDB(client, page, brandObj);
-  console.log('My response: ', response);
 
-  return {
+  const body = new ReadableStream({
+    async start(controller) {
+      // Send initial message    
+      controller.enqueue(encoder.encode("data: Looking for images in Flickr...\n\n"));
+      
+      // Wait for Flickr function
+      await addFlickrPhotosToMongoDB(client, page, brandObj, controller, encoder);
+      console.log('Now Finished adding images to MongoDB');
+      // Send a final update
+      controller.enqueue(encoder.encode(`data: Finished inserting ${imagesInserted} images into the database out of ${totalImages} new images.`));
+      controller.enqueue(encoder.encode(`event: complete`));
+      controller.close();
+  }});
+
+
+  return new Response(body, {
     headers: {
-      "Access-Control-Allow-Origin": "*"
-    },
-    statusCode: 200,
-    body: JSON.stringify({ totalImages, imagesInserted, status: response.status })
-  }
-};
+      "content-type": "text/event-stream", // For Server-Sent Events
+      "Access-Control-Allow-Origin": "*",
+    }
+  });
 
-async function addFlickrPhotosToMongoDB(client, page, brandObj) {
+}
+
+async function addFlickrPhotosToMongoDB(client, page, brandObj, controller, encoder) {
   console.log(`Starting API call to Flickr page ${page}`);
-  // get unix date for 1 month ago
-  const unixDate = Math.floor(Date.now() / 1000) - (60 * 60 * 24 * 30);
+  // get unix date for 1 week ago
+  const unixDate = Math.floor(Date.now() / 1000) - (60 * 60 * 24 * 7);
   try {
     const flickrResponse = await flickr.photos.search({
       user_id: '25964651@N03',
@@ -64,9 +76,12 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj) {
     });
     if (flickrResponse.errors !== undefined && flickrResponse.errors.length) throw new Error(response.errors);
     // console.log(flickrResponse.body);
-    totalImages = flickrResponse.body.photos.total;
+    if(!totalImages) {
+      totalImages = flickrResponse.body.photos.total;
+      console.log('Total images found in Flickr: ' + totalImages);
+      controller.enqueue(encoder.encode(`data: Found ${totalImages} images uploaded in the last 7 days in Flickr.\n\n`));
+    }
     const maxPages = flickrResponse.body.photos.pages;
-    console.log('Total images found in Flickr: ' + totalImages);
     console.log('Total pages: ' + maxPages);
     const imagesReturned = flickrResponse.body.photos.photo;
     
@@ -87,11 +102,17 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj) {
         delete doc.owner;
         return doc;
     })
+    controller.enqueue(encoder.encode(`data: Fetching page ${page} from Flickr...\n\n`));
     // Insert our images into the DB
     const dbResponse = await insertManyImages(client, imagesToInsert);
     console.log(`Done page ${page}`);
     console.log('dbResponse: ', dbResponse);
     imagesInserted += dbResponse.inserted;
+    controller.enqueue(encoder.encode(`data: Inserted ${imagesInserted} into DB from Flickr...\n\n`));
+    if(dbResponse.status.indexOf('11000') !== -1) {
+      // we have duplicates, so stop fetching images
+      controller.enqueue(encoder.encode(`data: Images already in DB...\n\n`));
+    }
     
     // check to see if we need to fetch more images
     if(page < maxPages) {
@@ -106,6 +127,7 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj) {
 
   } catch(error) {
     console.error('Error in addFlickrPhotosToMongoDB:', error);
+    controller.enqueue(encoder.encode(`Encountered a problem with the sync...\n\n`));
     return { status: 'error', error: error.message };
   }
     
