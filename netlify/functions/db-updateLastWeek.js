@@ -40,23 +40,36 @@ export default handler = async () => {
 
   const body = new ReadableStream({
     async start(controller) {
-      // Send initial message    
-      controller.enqueue(encoder.encode("data: Looking for images in Flickr...\n\n"));
-      
-      // Wait for Flickr function
-      await addFlickrPhotosToMongoDB(client, page, brandObj, controller, encoder);
-      console.log('Now Finished adding images to MongoDB');
-      // Send a final update
-      controller.enqueue(encoder.encode(`data: Finished inserting ${imagesInserted} images into the database out of ${totalImages} new images.`));
-      controller.enqueue(encoder.encode(`event: complete`));
-      controller.close();
-  }});
+      try {
+        // Send initial message    
+        controller.enqueue(encoder.encode("data: Looking for images in Flickr...\n\n"));
+        
+        // Wait for Flickr function
+        await addFlickrPhotosToMongoDB(client, page, brandObj, controller, encoder);
+        console.log('Now Finished adding images to MongoDB');
+        // Send a final update
+        controller.enqueue(encoder.encode(`data: Finished inserting ${imagesInserted} images into the database out of ${totalImages} new images.`));
+      }
+      catch (error) {
+        console.error('Error in stream:', error);
+        controller.enqueue(encoder.encode(
+          `event: error\n` +
+          `data: ${error.message}`
+        ));
+      } finally {
+        controller.enqueue(encoder.encode(`data: complete`));
+        controller.close();
 
+      }
+    }
+  })
 
   return new Response(body, {
     headers: {
       "content-type": "text/event-stream", // For Server-Sent Events
       "Access-Control-Allow-Origin": "*",
+      "cache-control": "no-cache",
+      "connection": "keep-alive",
     }
   });
 
@@ -79,7 +92,7 @@ async function addFlickrPhotosToMongoDB(client, page, brandObj, controller, enco
     if(!totalImages) {
       totalImages = flickrResponse.body.photos.total;
       console.log('Total images found in Flickr: ' + totalImages);
-      controller.enqueue(encoder.encode(`data: Found ${totalImages} images uploaded in the last 7 days in Flickr.\n\n`));
+      controller.enqueue(encoder.encode(`data: Found ${totalImages} images uploaded to Flickr in the last 7 days.\n\n`));
     }
     const maxPages = flickrResponse.body.photos.pages;
     console.log('Total pages: ' + maxPages);
