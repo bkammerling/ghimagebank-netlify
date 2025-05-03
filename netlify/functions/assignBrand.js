@@ -28,7 +28,7 @@ exports.handler = async (event, context) => {
     const filter = {
       $and: [
         { brand: { $exists: false } },
-        { title: { $regex: `^${jobNumber}.*`}}
+        { title: { $regex: `^${jobNumber}\\d\\d`}}
       ]
     }
     try {

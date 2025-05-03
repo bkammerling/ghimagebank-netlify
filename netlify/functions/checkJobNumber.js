@@ -22,12 +22,12 @@ exports.handler = async (event, context) => {
   try {
     await client.connect();
     const filter = {
-        title: { $regex: `^${jobNumber}.*`}
+        title: { $regex: `^${jobNumber}\\d\\d`}
     }
     const filterWithoutBrand = {
       $and: [
         { brand: { $exists: false } },
-        { title: { $regex: `^${jobNumber}.*`}}
+        { title: { $regex: `^${jobNumber}\\d\\d`}}
       ]
     }
     const [count, countWithoutBrand] = await Promise.all([
