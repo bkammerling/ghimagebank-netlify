@@ -10,11 +10,19 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 200,
       headers: {
-        'Access-Control-Allow-Origin': '*', // Or your domain
+        'Access-Control-Allow-Origin': 'https://imagebank.goodhumans.co.uk', // Or your domain
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
       },
       body: '',
+    };
+  }
+
+  const referer = event.headers.referer || '';
+  if (!referer.startsWith('https://imagebank.goodhumans.co.uk')) {
+    return {
+      statusCode: 403,
+      body: JSON.stringify({ error: 'Forbidden' }),
     };
   }
 
