@@ -114,7 +114,7 @@ const insertManyImages = async (client, newImages) => {
       // Some images weren't inserted - likely duplicates, stop fetching images
       const {writeErrors, insertedIds, ...logObj} = e.result.result;
       console.log(logObj)
-      returnObject.inserted = e.result.nInserted;
+      returnObject.inserted = e.result.result.nInserted;
       returnObject.status = `Success: ${e.code}`
     } else {
       console.log(e.result)
